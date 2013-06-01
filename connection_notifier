@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*- 
+
+import dbus
+import re
+import subprocess
+import threading
+import time
+
+# Settings
+_DEFAULT_INTERNET_ADDRESS = '8.8.8.8'
+_TIMEOUT_SECS = 6
+
+# Constants
+_STATUS_CONNECTED = 0
+_STATUS_DISCONNECTED = 1
+
+
+class ConnectionNotifier:
+
+    def __init__(self, network_name, address):
+        self.timeout = None
+        self.status = _STATUS_DISCONNECTED
+        self.network_name = network_name
+        self.address = address
+
+    def _set_connected_timeout(self):
+        if self.timeout:
+            self.timeout.cancel()
+        self.timeout = threading.Timer(_TIMEOUT_SECS, self._set_disconnected)
+        self.timeout.start()
+
+    def _notify_via_dbus(self, title, msg, icon):
+        notify = dbus.SessionBus().get_object(
+            'org.freedesktop.Notifications', '/org/freedesktop/Notifications')
+        notify.Notify(
+            'Connection Notifier',    # Application name
+            0,                        # Replaces ID
+            icon,                     # Notification icon
+            title,                    # Summary
+            msg,                      # Body
+            [],                       # Actions
+            [],                       # Hints
+            5000,                     # Timeout in milliseconds
+            dbus_interface='org.freedesktop.Notifications')
+
+    def _set_disconnected(self):
+        self.status = _STATUS_DISCONNECTED
+        self._notify_via_dbus(
+            'Desconectado', u'Você está desconectado da %s.' % self.network_name,
+            'network-disconnect')
+            
+    def _set_connected(self):
+        self.status = _STATUS_CONNECTED
+        self._notify_via_dbus(
+            'Conectado', u'Você está conectado à %s.' % self.network_name,
+            'network-connect')
+
+    def _parse_line(self, line):
+        return re.search(r'(time=\d+(\.\d+)? ms)', line) is not None
+
+    def _run(self):
+        ping_process = subprocess.Popen(
+            ['ping', '-i', '1', self.address],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ping_sent_at_least_once = False
+        try:
+            for line in iter(ping_process.stdout.readline, ''):
+                ping_sent_at_least_once = True
+                ping_successful_response = self._parse_line(line)
+                if self.status == _STATUS_CONNECTED:
+                    if ping_successful_response:
+                        self._set_connected_timeout()
+                elif self.status == _STATUS_DISCONNECTED:
+                    if ping_successful_response:
+                        self._set_connected()
+        finally:
+            if self.timeout:
+                self.timeout.cancel()
+            (stdout, stderr) = ping_process.communicate()
+            success = ping_sent_at_least_once and not stderr
+            return success
+
+    def _start(self):
+        success = self._run()
+        while not success:
+	    time.sleep(1)
+            success = self._run()
+
+    def start(self):
+        self.thread = threading.Thread(target=self._start)
+        self.thread.start()
+
+
+if __name__ == '__main__':
+    notifier_internet = ConnectionNotifier('Internet', _DEFAULT_INTERNET_ADDRESS)
+    notifier_local = ConnectionNotifier('Rede local', '10.0.0.100')
+
+    notifier_internet.start()
+    time.sleep(0.5)
+    notifier_local.start()
