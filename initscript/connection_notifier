@@ -1,0 +1,61 @@
+#!/bin/bash
+
+BIN="/usr/bin/connection_notifier"
+
+start() {
+    echo "Starting..."
+    PROCS=$(ps u | grep 'python' | grep 'connection_notifier' | awk '{print $2;}')
+    echo $PROCS | grep '[0-9]' &>/dev/null
+    GREP_RETVAL=$?
+    if [ $GREP_RETVAL -eq 0 ]; then
+        echo "Already running!"
+        return 2
+    else
+        if [ -x $BIN ]; then
+            $BIN &
+            echo "Started!"
+        else
+            echo "File '$BIN' not found or it's not executable."
+            return 2
+        fi
+    fi
+    return 0
+}
+
+stop() {
+    echo "Stopping..."
+    PROCS=$(ps u | grep 'python' | grep 'connection_notifier' | awk '{print $2;}')
+    echo $PROCS | grep '[0-9]' &>/dev/null
+    GREP_RETVAL=$?
+    if [ $GREP_RETVAL -ne 0 ]; then
+        echo "Not running!"
+        return 2
+    else
+        kill $PROCS
+        echo "Stopped!"
+    fi
+    return 0
+}
+
+case "$1" in
+  start)
+    start
+    exit $?
+    ;;
+  stop)
+    stop
+    exit $?
+    ;;
+  restart)
+    stop
+    start
+    exit $?
+    ;;
+  *)
+    echo "Usage: /etc/init.d/connection_notifier {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0
+
